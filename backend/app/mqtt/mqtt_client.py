@@ -3,7 +3,7 @@ import json
 import os
 import threading
 from app.database.database import SessionLocal
-from app.models.models import Device, AccessLog
+from app.models.models import Device, AccessLog, User
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "madrjl-websocket.cloud.shiftr.io")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
@@ -77,4 +77,25 @@ def publish_gate_command(action: str, source: str = "manual", user_id: int = Non
     if confidence: payload["confidence"] = confidence
     
     client.publish("gate/open" if action == "open" else "gate/close", json.dumps(payload))
+    
+    if action == "open":
+        try:
+            db = SessionLocal()
+            log_method = "Face Recognition / Gesture" if "gesture" in source else "Manual Control"
+            
+            if not username and "gesture_" in source:
+                username = source.split("gesture_")[-1]
+                
+            user = db.query(User).filter(User.name == username).first() if username else None
+            
+            new_log = AccessLog(
+                user_id=user.id if user else None,
+                method=log_method,
+                status="Success"
+            )
+            db.add(new_log)
+            db.commit()
+            db.close()
+        except Exception as e:
+            print(f"Failed to save access log: {e}")
 

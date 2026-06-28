@@ -12,6 +12,7 @@ from app.models import models
 from app.mqtt.mqtt_client import start_mqtt, publish_gate_command
 from app.websocket.ws_manager import manager
 from fastapi import WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 models.Base.metadata.create_all(bind=database.engine)
@@ -25,6 +26,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+os.makedirs("dataset", exist_ok=True)
+app.mount("/dataset", StaticFiles(directory="dataset"), name="dataset")
 
 @app.on_event("startup")
 def startup_event():
@@ -102,8 +106,24 @@ def register_user(
 
 @app.get("/api/logs")
 def get_logs(db: Session = Depends(database.get_db), limit: int = 50):
-    logs = db.query(models.AccessLog).order_by(models.AccessLog.created_at.desc()).limit(limit).all()
-    return logs
+    logs = db.query(models.AccessLog, models.User).outerjoin(
+        models.User, models.AccessLog.user_id == models.User.id
+    ).order_by(models.AccessLog.created_at.desc()).limit(limit).all()
+    
+    result = []
+    for log, user in logs:
+        # Convert dataset path to a web URL
+        photo_url = "/" + user.photo.replace("\\", "/") if user and user.photo else "https://i.pravatar.cc/150?u=unknown"
+        
+        result.append({
+            "id": log.id,
+            "method": log.method,
+            "status": log.status,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+            "name": user.name if user else "Unknown User",
+            "photo": photo_url
+        })
+    return result
 
 @app.get("/api/devices")
 def get_devices(db: Session = Depends(database.get_db)):
