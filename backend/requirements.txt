@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+sqlalchemy
+pymysql
+paho-mqtt
+opencv-python
+insightface
+onnxruntime
+python-multipart
+mediapipe
