@@ -1,0 +1,72 @@
+=================================================
+  SMART GATE ACCESS - PANDUAN INSTALASI & SETUP
+=================================================
+
+Aplikasi ini terdiri dari dua bagian utama:
+1. BACKEND (Python FastAPI) - Menangani AI (Wajah & Tangan), Kamera, dan Database.
+2. FRONTEND (Next.js) - Menampilkan Dashboard (Antarmuka Pengguna).
+
+-------------------------------------------------
+A. PERSYARATAN SISTEM YANG HARUS DIINSTALL
+-------------------------------------------------
+Sebelum memulai, pastikan laptop/komputer Anda sudah terinstall:
+- Python 3.10 atau yang lebih baru (Disarankan versi 3.10 - 3.12 agar library AI berjalan mulus)
+- Node.js (Minimal versi 18.x) & npm
+- Git (Opsional, untuk versioning)
+
+-------------------------------------------------
+B. CARA INSTALASI & SETUP BACKEND
+-------------------------------------------------
+1. Buka Terminal / Command Prompt.
+2. Pindah ke direktori backend:
+   cd d:\project\gate-open\smart-gate\backend
+
+3. (Opsional tapi disarankan) Buat Virtual Environment agar tidak bentrok dengan project Python lain:
+   python -m venv venv
+   
+   Aktifkan Virtual Environment:
+   - Windows: venv\Scripts\activate
+   - Mac/Linux: source venv/bin/activate
+
+4. Install semua library yang dibutuhkan:
+   pip install -r requirements.txt
+
+-------------------------------------------------
+C. CARA INSTALASI & SETUP FRONTEND
+-------------------------------------------------
+1. Buka Terminal / Command Prompt baru (biarkan terminal backend tetap ada).
+2. Pindah ke direktori frontend:
+   cd d:\project\gate-open\smart-gate\frontend
+
+3. Install semua dependencies Next.js:
+   npm install
+
+-------------------------------------------------
+D. CARA MENJALANKAN APLIKASI
+-------------------------------------------------
+Untuk menjalankan aplikasi sepenuhnya, Anda perlu menjalankan Backend dan Frontend secara bersamaan di 2 terminal yang berbeda.
+
+TERMINAL 1 (Menjalankan Backend):
+1. cd d:\project\gate-open\smart-gate\backend
+2. venv\Scripts\activate  (Jika menggunakan virtual environment)
+3. Jalankan server:
+   uvicorn app.main:app --reload
+
+TERMINAL 2 (Menjalankan Frontend):
+1. cd d:\project\gate-open\smart-gate\frontend
+2. Jalankan dashboard:
+   npm run dev
+
+Setelah keduanya berjalan:
+Buka web browser Anda (Chrome/Edge/Firefox) dan kunjungi:
+http://localhost:3000
+
+-------------------------------------------------
+E. CARA MENGGUNAKAN APLIKASI
+-------------------------------------------------
+1. Mendaftar Wajah: 
+   Klik kartu "Users" (berwarna ungu) di Dashboard. Isi nama, email, dan unggah foto wajah Anda dengan jelas. Sistem akan otomatis mengingat wajah tersebut.
+2. Membuka Gerbang via Gestur: 
+   Berdiri di depan kamera. Letakkan telapak tangan Anda yang terbuka (5 jari) di dalam kotak biru "Put Hand Here". Gerbang akan otomatis terbuka dan tercatat di Log.
+3. Membuka Gerbang secara Manual:
+   Klik tombol "Open Gate" berwarna hijau di Dashboard.

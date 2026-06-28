@@ -37,20 +37,11 @@ def generate_frames(camera_source=0):
         user_name = None
         
         for face in recognized_faces:
-            x1, y1, x2, y2 = face["bbox"]
             name = face["name"]
             
-            # Determine box color
             if name != "Unknown":
-                color = (0, 255, 0) # Green for known
                 known_user_present = True
                 user_name = name
-            else:
-                color = (0, 0, 255) # Red for unknown
-                
-            # Draw Face Bounding Box
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
         # 2. Gesture Recognition (Only check if a known user is in frame to save processing)
         if known_user_present:
