@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, Activity, Video, ShieldCheck, VideoOff, Wifi, WifiOff } from "lucide-react";
+import { Users, Activity, Video, ShieldCheck, VideoOff, Wifi, WifiOff, FileText, AlertTriangle } from "lucide-react";
 
 export default function Dashboard() {
   const [gateStatus, setGateStatus] = useState("CLOSED");
@@ -13,6 +13,7 @@ export default function Dashboard() {
     camera: "online"
   });
 
+  const [faceRecognitionEnabled, setFaceRecognitionEnabled] = useState(true);
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
   const [registerForm, setRegisterForm] = useState({ name: "", email: "", file: null as File | null });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -60,7 +61,15 @@ export default function Dashboard() {
       
       const logsRes = await fetch("http://localhost:8000/api/logs?limit=10");
       const logsData = await logsRes.json();
-      setRecentLogs(logsData);
+      setRecentLogs(logsData.data || logsData || []);
+
+      const settingsRes = await fetch("http://localhost:8000/api/settings/face-recognition");
+      const settingsData = await settingsRes.json();
+      setFaceRecognitionEnabled(settingsData.enabled);
+
+      const gateRes = await fetch("http://localhost:8000/api/gate/status");
+      const gateData = await gateRes.json();
+      setGateStatus(gateData.status);
     } catch (e) {
       console.error("Failed to fetch dashboard data", e);
     }
@@ -82,7 +91,21 @@ export default function Dashboard() {
     }
   };
 
-  const getPhotoUrl = (photo: string) => photo.startsWith("http") ? photo : `http://localhost:8000${photo}`;
+  const toggleFaceRecognition = async () => {
+    const newState = !faceRecognitionEnabled;
+    setFaceRecognitionEnabled(newState);
+    try {
+      await fetch(`http://localhost:8000/api/settings/face-recognition?enabled=${newState}`, { method: "POST" });
+    } catch (e) {
+      console.error("Failed to toggle face recognition", e);
+      setFaceRecognitionEnabled(!newState);
+    }
+  };
+
+  const getPhotoUrl = (photo: string | null) => {
+    if (!photo) return "https://i.pravatar.cc/150?u=unknown";
+    return photo.startsWith("http") ? photo : `http://localhost:8000${photo}`;
+  };
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-50 p-6 md:p-12 font-sans selection:bg-indigo-500/30">
@@ -107,6 +130,18 @@ export default function Dashboard() {
           </div>
         </header>
 
+        {/* Navigation */}
+        <div className="flex gap-4">
+          <a href="/logs" className="flex items-center gap-2 px-4 py-2 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-indigo-500/40 text-neutral-300 hover:text-white transition-colors text-sm">
+            <FileText className="w-4 h-4" />
+            Access Logs
+          </a>
+          <a href="/faces" className="flex items-center gap-2 px-4 py-2 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-indigo-500/40 text-neutral-300 hover:text-white transition-colors text-sm">
+            <Users className="w-4 h-4" />
+            Face Management
+          </a>
+        </div>
+
         {/* Two-Column Layout: Left = Camera + Logs (each full height), Right = 3 stacked cards */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
           
@@ -121,6 +156,19 @@ export default function Dashboard() {
                   <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
                   LIVE
                 </div>
+              </div>
+              <div className="absolute top-4 right-4 z-20">
+                <button
+                  onClick={toggleFaceRecognition}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 border backdrop-blur-md transition-colors ${
+                    faceRecognitionEnabled
+                      ? "bg-indigo-500/30 text-indigo-300 border-indigo-500/40 hover:bg-indigo-500/50"
+                      : "bg-neutral-500/30 text-neutral-400 border-neutral-500/40 hover:bg-neutral-500/50"
+                  }`}
+                >
+                  <div className={`w-1.5 h-1.5 rounded-full ${faceRecognitionEnabled ? "bg-indigo-400" : "bg-neutral-400"}`} />
+                  Face Rec: {faceRecognitionEnabled ? "ON" : "OFF"}
+                </button>
               </div>
               
               <div className="w-full h-full relative">
@@ -144,7 +192,7 @@ export default function Dashboard() {
             <div className="rounded-3xl bg-neutral-900 border border-neutral-800 p-6 shadow-lg overflow-hidden flex flex-col max-h-[360px] flex-1 min-h-0">
               <h3 className="text-neutral-400 text-sm font-semibold uppercase tracking-wider mb-4 flex justify-between items-center flex-shrink-0">
                 <span>Recent Activity</span>
-                <span className="text-xs text-indigo-400 cursor-pointer hover:text-indigo-300">View All</span>
+                <a href="/logs" className="text-xs text-indigo-400 cursor-pointer hover:text-indigo-300">View All</a>
               </h3>
               
               <div className="overflow-y-auto pr-2 custom-scrollbar flex-1 min-h-0">
@@ -222,9 +270,9 @@ export default function Dashboard() {
                 <div className="text-4xl font-bold text-white group-hover:scale-105 transition-transform origin-left">{usersCount}</div>
                 <div className="text-indigo-200/60 text-sm mt-1">Registered Faces</div>
               </div>
-              <div className="mt-6 text-sm text-indigo-400 font-medium flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+              <a href="/faces" className="mt-6 text-sm text-indigo-400 font-medium flex items-center gap-1 group-hover:translate-x-1 transition-transform">
                 Manage database &rarr;
-              </div>
+              </a>
             </div>
 
             {/* Quick Actions */}
