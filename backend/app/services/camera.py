@@ -26,7 +26,8 @@ GESTURE_INTERVAL = 1.0
 UNKNOWN_FACE_INTERVAL = 3.0
 
 # Face recognition toggle (can be turned off via API while keeping gesture tracking)
-face_recognition_enabled = True
+# Default from env var FACE_RECOGNITION_ENABLED (true/false), defaults to True
+face_recognition_enabled = os.environ.get("FACE_RECOGNITION_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # Gate state tracking (shared across API and gesture trigger)
 gate_state = "CLOSED"

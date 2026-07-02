@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, Depends, BackgroundTasks, File, UploadFile, Form, Query
 import os
 import shutil
