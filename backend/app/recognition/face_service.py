@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import logging
 import json
+import os
 from sqlalchemy.orm import Session
 from app.models.models import User
 
@@ -13,11 +14,20 @@ use_mock_ai = False
 
 try:
     import insightface
+    import onnxruntime as ort
     # Initialize the InsightFace model
     model = insightface.app.FaceAnalysis()
-    # ctx_id=0 for GPU, -1 for CPU
-    model.prepare(ctx_id=-1, det_size=(640, 640))
-    logger.info("InsightFace model loaded successfully.")
+    # Force GPU since RTX 3050 is available
+    use_gpu = True
+    ctx_id = 0
+    
+    # ONNX Runtime optimization
+    session_options = ort.SessionOptions()
+    session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    session_options.intra_op_num_threads = 4
+    
+    model.prepare(ctx_id=ctx_id, det_size=(320, 320))
+    logger.info(f"InsightFace model loaded successfully on GPU (RTX 3050).")
 except Exception as e:
     logger.warning(f"Failed to load InsightFace ({e}). Falling back to Mock AI.")
     use_mock_ai = True

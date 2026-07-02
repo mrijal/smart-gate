@@ -6,6 +6,6 @@ pymysql
 paho-mqtt
 opencv-python
 insightface
-onnxruntime
+onnxruntime-gpu
 python-multipart
 mediapipe

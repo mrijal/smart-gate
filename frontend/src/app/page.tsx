@@ -107,132 +107,139 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* Bento Grid Layout */}
-        <div className="grid grid-cols-1 md:grid-cols-4 grid-rows-1 md:grid-rows-3 gap-6 auto-rows-[minmax(180px,auto)]">
+        {/* Two-Column Layout: Left = Camera + Logs (each full height), Right = 3 stacked cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
           
-          {/* Live Camera Stream (Large Tile) */}
-          <div className="md:col-span-3 md:row-span-2 rounded-3xl bg-neutral-900 border border-neutral-800 overflow-hidden relative group shadow-xl">
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent z-10" />
-            <div className="absolute top-4 left-4 z-20 flex gap-2">
-              <div className="bg-black/50 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border border-white/10">
-                <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
-                LIVE
+          {/* LEFT COLUMN: Camera + Logs (stacked vertically) */}
+          <div className="flex flex-col gap-6 min-h-0">
+            
+            {/* Live Camera Stream - Fixed 16:9 Landscape */}
+            <div className="rounded-3xl bg-neutral-900 border border-neutral-800 overflow-hidden relative group shadow-xl aspect-video max-h-[520px] flex-shrink-0">
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent z-10" />
+              <div className="absolute top-4 left-4 z-20 flex gap-2">
+                <div className="bg-black/50 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border border-white/10">
+                  <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+                  LIVE
+                </div>
+              </div>
+              
+              <div className="w-full h-full relative">
+                 {deviceStatus.camera === "online" ? (
+                   <img 
+                     src="http://localhost:8000/api/video_feed" 
+                     alt="Live Camera Feed" 
+                     className="w-full h-full object-cover"
+                     onError={() => setDeviceStatus(prev => ({ ...prev, camera: "offline" }))}
+                   />
+                 ) : (
+                   <div className="w-full h-full flex flex-col items-center justify-center bg-neutral-950">
+                     <VideoOff className="w-16 h-16 text-neutral-800 mb-4" />
+                     <p className="text-neutral-500 font-medium">Camera Feed Offline</p>
+                   </div>
+                 )}
               </div>
             </div>
-            
-            <div className="w-full h-full flex flex-col items-center justify-center bg-neutral-950">
-               {deviceStatus.camera === "online" ? (
-                 <img 
-                   src="http://localhost:8000/api/video_feed" 
-                   alt="Live Camera Feed" 
-                   className="w-full h-full object-cover absolute inset-0 z-0"
-                   onError={() => setDeviceStatus(prev => ({ ...prev, camera: "offline" }))}
-                 />
-               ) : (
-                 <>
-                   <VideoOff className="w-16 h-16 text-neutral-800 mb-4 z-20" />
-                   <p className="text-neutral-500 font-medium z-20">Camera Feed Offline</p>
-                 </>
-               )}
-            </div>
-          </div>
 
-          {/* Device Health */}
-          <div className="md:col-span-1 rounded-3xl bg-neutral-900 border border-neutral-800 p-6 flex flex-col justify-between shadow-lg hover:border-neutral-700 transition-colors">
-            <div>
-              <h3 className="text-neutral-400 text-sm font-semibold uppercase tracking-wider mb-4 flex items-center gap-2">
-                <Activity className="w-4 h-4" />
-                System Health
+            {/* Access Logs - Fixed height with scroll */}
+            <div className="rounded-3xl bg-neutral-900 border border-neutral-800 p-6 shadow-lg overflow-hidden flex flex-col max-h-[360px] flex-1 min-h-0">
+              <h3 className="text-neutral-400 text-sm font-semibold uppercase tracking-wider mb-4 flex justify-between items-center flex-shrink-0">
+                <span>Recent Activity</span>
+                <span className="text-xs text-indigo-400 cursor-pointer hover:text-indigo-300">View All</span>
               </h3>
-              <div className="space-y-4 mt-6">
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">ESP32 Controller</span>
-                  {deviceStatus.esp32 === "online" ? <Wifi className="w-4 h-4 text-emerald-400" /> : <WifiOff className="w-4 h-4 text-red-400" />}
+              
+              <div className="overflow-y-auto pr-2 custom-scrollbar flex-1 min-h-0">
+                <div className="space-y-3">
+                  {recentLogs.map((log, i) => (
+                    <div key={i} className="flex items-center justify-between p-3 rounded-2xl bg-neutral-950/50 border border-neutral-800/50 hover:bg-neutral-800/50 transition-colors">
+                      <div className="flex items-center gap-4">
+                        <img src={getPhotoUrl(log.photo)} alt="face" className="w-10 h-10 rounded-full border border-neutral-700 object-cover" />
+                        <div>
+                          <div className="font-medium text-sm text-neutral-200">{log.name}</div>
+                          <div className="text-xs text-neutral-500">{log.method}</div>
+                        </div>
+                      </div>
+                      <div className="text-right flex flex-col items-end">
+                        <div className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          log.status === "Success" ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
+                        }`}>
+                          {log.status}
+                        </div>
+                        <div className="text-xs text-neutral-500 mt-1">
+                          {log.created_at ? new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now"}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {recentLogs.length === 0 && (
+                    <div className="text-center text-sm text-neutral-500 py-4">No recent activity</div>
+                  )}
                 </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">AI Backend</span>
-                  {deviceStatus.backend === "online" ? <Wifi className="w-4 h-4 text-emerald-400" /> : <WifiOff className="w-4 h-4 text-red-400" />}
-                </div>
-
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">Camera Stream</span>
-                  {deviceStatus.camera === "online" ? <Wifi className="w-4 h-4 text-emerald-400" /> : <WifiOff className="w-4 h-4 text-red-400" />}
-                </div>
-
               </div>
             </div>
           </div>
 
-          {/* User Management Shortcut */}
-          <div 
-            onClick={() => setIsRegisterModalOpen(true)}
-            className="md:col-span-1 rounded-3xl bg-gradient-to-br from-indigo-600/20 to-purple-900/20 border border-indigo-500/20 p-6 flex flex-col justify-between shadow-lg hover:border-indigo-500/40 transition-colors cursor-pointer group"
-          >
-            <h3 className="text-indigo-300 text-sm font-semibold uppercase tracking-wider mb-2 flex items-center gap-2">
-              <Users className="w-4 h-4" />
-              Users
-            </h3>
-            <div className="mt-4">
-              <div className="text-4xl font-bold text-white group-hover:scale-105 transition-transform origin-left">{usersCount}</div>
-              <div className="text-indigo-200/60 text-sm mt-1">Registered Faces</div>
-            </div>
-            <div className="mt-6 text-sm text-indigo-400 font-medium flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-              Manage database &rarr;
-            </div>
-          </div>
-
-          {/* Access Logs (Wide Tile) */}
-          <div className="md:col-span-3 rounded-3xl bg-neutral-900 border border-neutral-800 p-6 shadow-lg overflow-hidden flex flex-col">
-            <h3 className="text-neutral-400 text-sm font-semibold uppercase tracking-wider mb-4 flex justify-between items-center">
-              <span>Recent Activity</span>
-              <span className="text-xs text-indigo-400 cursor-pointer hover:text-indigo-300">View All</span>
-            </h3>
+          {/* RIGHT COLUMN: 3 Stacked Cards */}
+          <div className="flex flex-col gap-6">
             
-            <div className="flex-1 overflow-auto pr-2 custom-scrollbar">
-              <div className="space-y-3">
-                {recentLogs.map((log, i) => (
-                  <div key={i} className="flex items-center justify-between p-3 rounded-2xl bg-neutral-950/50 border border-neutral-800/50 hover:bg-neutral-800/50 transition-colors">
-                    <div className="flex items-center gap-4">
-                      <img src={getPhotoUrl(log.photo)} alt="face" className="w-10 h-10 rounded-full border border-neutral-700 object-cover" />
-                      <div>
-                        <div className="font-medium text-sm text-neutral-200">{log.name}</div>
-                        <div className="text-xs text-neutral-500">{log.method}</div>
-                      </div>
-                    </div>
-                    <div className="text-right flex flex-col items-end">
-                      <div className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        log.status === "Success" ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
-                      }`}>
-                        {log.status}
-                      </div>
-                      <div className="text-xs text-neutral-500 mt-1">
-                        {log.created_at ? new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now"}
-                      </div>
-                    </div>
+            {/* Device Health */}
+            <div className="rounded-3xl bg-neutral-900 border border-neutral-800 p-6 flex flex-col justify-between shadow-lg hover:border-neutral-700 transition-colors">
+              <div>
+                <h3 className="text-neutral-400 text-sm font-semibold uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Activity className="w-4 h-4" />
+                  System Health
+                </h3>
+                <div className="space-y-4 mt-6">
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm">ESP32 Controller</span>
+                    {deviceStatus.esp32 === "online" ? <Wifi className="w-4 h-4 text-emerald-400" /> : <WifiOff className="w-4 h-4 text-red-400" />}
                   </div>
-                ))}
-                {recentLogs.length === 0 && (
-                  <div className="text-center text-sm text-neutral-500 py-4">No recent activity</div>
-                )}
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm">AI Backend</span>
+                    {deviceStatus.backend === "online" ? <Wifi className="w-4 h-4 text-emerald-400" /> : <WifiOff className="w-4 h-4 text-red-400" />}
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm">Camera Stream</span>
+                    {deviceStatus.camera === "online" ? <Wifi className="w-4 h-4 text-emerald-400" /> : <WifiOff className="w-4 h-4 text-red-400" />}
+                  </div>
+
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Quick Actions */}
-          <div className="md:col-span-1 rounded-3xl bg-neutral-900 border border-neutral-800 p-6 flex flex-col shadow-lg">
-             <h3 className="text-neutral-400 text-sm font-semibold uppercase tracking-wider mb-4">Manual Control</h3>
-             <div className="flex-1 flex flex-col gap-3 justify-center">
-                <button onClick={() => handleManualControl('open')} className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-colors shadow-[0_0_15px_rgba(5,150,105,0.2)]">
-                  Open Gate
-                </button>
-                <button onClick={() => handleManualControl('close')} className="w-full py-4 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-white font-semibold transition-colors">
-                  Close Gate
-                </button>
-             </div>
-          </div>
+            {/* User Management Shortcut */}
+            <div 
+              onClick={() => setIsRegisterModalOpen(true)}
+              className="rounded-3xl bg-gradient-to-br from-indigo-600/20 to-purple-900/20 border border-indigo-500/20 p-6 flex flex-col justify-between shadow-lg hover:border-indigo-500/40 transition-colors cursor-pointer group"
+            >
+              <h3 className="text-indigo-300 text-sm font-semibold uppercase tracking-wider mb-2 flex items-center gap-2">
+                <Users className="w-4 h-4" />
+                Users
+              </h3>
+              <div className="mt-4">
+                <div className="text-4xl font-bold text-white group-hover:scale-105 transition-transform origin-left">{usersCount}</div>
+                <div className="text-indigo-200/60 text-sm mt-1">Registered Faces</div>
+              </div>
+              <div className="mt-6 text-sm text-indigo-400 font-medium flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                Manage database &rarr;
+              </div>
+            </div>
 
+            {/* Quick Actions */}
+            <div className="rounded-3xl bg-neutral-900 border border-neutral-800 p-6 flex flex-col shadow-lg">
+               <h3 className="text-neutral-400 text-sm font-semibold uppercase tracking-wider mb-4">Manual Control</h3>
+               <div className="flex-1 flex flex-col gap-3 justify-center">
+                  <button onClick={() => handleManualControl('open')} className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-colors shadow-[0_0_15px_rgba(5,150,105,0.2)]">
+                    Open Gate
+                  </button>
+                  <button onClick={() => handleManualControl('close')} className="w-full py-4 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-white font-semibold transition-colors">
+                    Close Gate
+                  </button>
+               </div>
+            </div>
+          </div>
         </div>
       </div>
 

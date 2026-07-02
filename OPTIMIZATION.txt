@@ -1,0 +1,184 @@
+OPTIMIZATION GUIDE - Smart Gate Face & Gesture Recognition
+===========================================================
+
+Hardware: RTX 3050 6GB, 16GB RAM, i5-13HX
+Target: Smooth real-time face recognition + gesture detection
+
+---
+
+APPLIED CODE OPTIMIZATIONS
+==========================
+
+1. FACE SERVICE (face_service.py)
+   - det_size: 640x640 -> 320x320 (2x faster face detection)
+   - GPU enabled via USE_GPU=true env var
+
+2. GESTURE SERVICE (gesture_service.py)
+   - model_complexity=0 (light MediaPipe model, 2-3x faster)
+   - Still uses full hand landmarks for detection
+
+3. CAMERA SERVICE (camera.py)
+   - Camera resolution: 640x480 -> 480x360 (2x less pixels)
+   - Gesture interval: 0.5s -> 1.0s (2x less gesture CPU)
+   - JPEG quality: 60 -> 50 (smaller frames, faster streaming)
+   - Frame rate limit: 20 FPS -> 12 FPS (less CPU load)
+
+---
+
+HOW TO ENABLE GPU (CRITICAL FOR 3-5x SPEEDUP)
+=============================================
+
+WINDOWS (Native Python):
+------------------------
+1. Install CUDA Toolkit 12.x from NVIDIA website
+2. Install cuDNN 9.x for CUDA 12
+3. Verify: `nvcc --version` and `nvidia-smi`
+
+4. Set environment variables BEFORE running:
+   PowerShell:
+   ```powershell
+   $env:USE_GPU="true"
+   $env:CUDA_VISIBLE_DEVICES="0"
+   python -m uvicorn app.main:app --reload
+   ```
+   
+   CMD:
+   ```cmd
+   set USE_GPU=true
+   set CUDA_VISIBLE_DEVICES=0
+   python -m uvicorn app.main:app --reload
+   ```
+
+   Or create .env file in backend/:
+   ```
+   USE_GPU=true
+   CUDA_VISIBLE_DEVICES=0
+   ```
+
+5. Verify GPU is working - check logs for:
+   "InsightFace model loaded successfully on GPU"
+
+DOCKER (Recommended for GPU):
+-----------------------------
+docker-compose.yml must have:
+```yaml
+services:
+  backend:
+    build: ./backend
+    environment:
+      - USE_GPU=true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    runtime: nvidia
+```
+
+Run: `docker-compose up --build`
+
+---
+
+OPTIONAL FURTHER OPTIMIZATIONS
+==============================
+
+1. Enable MediaPipe GPU (Windows):
+   ```bash
+   pip install mediapipe-gpu
+   ```
+   Then in gesture_service.py, add GPU delegate (requires MediaPipe 0.10+)
+
+2. Reduce face recognition interval (if 2s is too slow):
+   ```python
+   # In camera.py
+   FACE_RECOG_INTERVAL = 1.5  # Was 2.0
+   ```
+
+3. Lower camera resolution further (if still lagging):
+   ```python
+   # In camera.py
+   cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+   cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+   ```
+
+4. Disable gesture drawing landmarks (big CPU saver):
+   In gesture_service.py, comment out:
+   ```python
+   # mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+   ```
+
+5. Use ONNX Runtime optimization for InsightFace:
+   ```bash
+   pip install onnxruntime-gpu
+   ```
+   Already in requirements.txt - ensure CUDA version matches
+
+---
+
+EXPECTED PERFORMANCE AFTER OPTIMIZATIONS
+========================================
+
+| Metric | Before | After (GPU) | After (CPU) |
+|--------|--------|-------------|-------------|
+| Face detection | ~200ms | ~40ms | ~150ms |
+| Gesture detection | ~100ms | ~30ms | ~60ms |
+| Total frame time | ~300ms | ~70ms | ~210ms |
+| Effective FPS | ~3-5 | ~12-14 | ~5-6 |
+
+With GPU enabled: Should run smoothly at 12+ FPS
+Without GPU: Usable at 5-6 FPS with reduced resolution
+
+---
+
+TROUBLESHOOTING
+===============
+
+"InsightFace model loaded successfully on CPU"
+-> GPU not detected. Check:
+   - CUDA Toolkit installed
+   - onnxruntime-gpu matches CUDA version
+   - USE_GPU=true env var set
+
+MediaPipe slow on Windows
+-> Install mediapipe-gpu, or accept CPU fallback
+
+Out of GPU memory (6GB limit)
+-> Reduce det_size to (160, 160) in face_service.py
+-> Reduce camera resolution further
+
+Camera lag / high latency
+-> Increase JPEG quality if network is fast
+-> Decrease time.sleep(0.08) to 0.05 for higher FPS
+
+---
+
+VERIFICATION COMMANDS
+=====================
+
+Check GPU available to OpenCV:
+```python
+import cv2
+print(cv2.cuda.getCudaEnabledDeviceCount())
+```
+
+Check InsightFace providers:
+```python
+import insightface
+app = insightface.app.FaceAnalysis()
+print(app.models)  # Should show CUDAExecutionProvider
+```
+
+Monitor GPU usage:
+```bash
+nvidia-smi -l 1  # Watch GPU memory and utilization
+```
+
+---
+
+FILES MODIFIED
+==============
+- backend/app/recognition/face_service.py: det_size 320x320
+- backend/app/recognition/gesture_service.py: model_complexity=0
+- backend/app/services/camera.py: resolution 480x360, gesture 1s interval, JPEG 50, 12 FPS

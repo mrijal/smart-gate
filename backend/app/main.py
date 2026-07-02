@@ -34,8 +34,11 @@ app.mount("/dataset", StaticFiles(directory="dataset"), name="dataset")
 def startup_event():
     start_mqtt()
     # Load known faces from DB into memory
-    db = next(database.get_db())
-    load_known_faces(db)
+    db = database.SessionLocal()
+    try:
+        load_known_faces(db)
+    finally:
+        db.close()
 
 @app.get("/")
 def read_root():

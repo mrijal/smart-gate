@@ -4,6 +4,7 @@ import os
 import threading
 from app.database.database import SessionLocal
 from app.models.models import Device, AccessLog, User
+from app.websocket.ws_manager import manager
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "madrjl-websocket.cloud.shiftr.io")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
@@ -39,8 +40,13 @@ def on_message(client, userdata, msg):
             db.commit()
 
         elif msg.topic == "gate/status":
-            # Can update a global state or websocket
-            pass
+            # Broadcast gate status to all connected websocket clients
+            status = payload.get("status")
+            import asyncio
+            asyncio.run_coroutine_threadsafe(
+                manager.broadcast_log({"type": "gate_status", "status": status}),
+                asyncio.get_event_loop()
+            )
             
         elif msg.topic == "gate/auth/request":
             # Handle RFID auth request
@@ -67,14 +73,14 @@ def start_mqtt():
     except Exception as e:
         print(f"Failed to connect to MQTT: {e}")
 
-def publish_gate_command(action: str, source: str = "manual", user_id: int = None, username: str = None, confidence: float = None):
+def publish_gate_command(action: str, source: str = "manual", user_id: int | None = None, username: str | None = None, confidence: float | None = None):
     payload = {
         "action": action,
         "source": source
     }
-    if user_id: payload["user_id"] = user_id
-    if username: payload["username"] = username
-    if confidence: payload["confidence"] = confidence
+    if user_id is not None: payload["user_id"] = str(user_id)
+    if username is not None: payload["username"] = username
+    if confidence is not None: payload["confidence"] = str(confidence)
     
     client.publish("gate/open" if action == "open" else "gate/close", json.dumps(payload))
     
