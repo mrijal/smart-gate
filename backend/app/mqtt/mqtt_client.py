@@ -40,8 +40,11 @@ def on_message(client, userdata, msg):
             db.commit()
 
         elif msg.topic == "gate/status":
-            # Broadcast gate status to all connected websocket clients
             status = payload.get("status")
+            # Update backend gate state
+            from app.services.camera import set_gate_state
+            set_gate_state(status)
+            # Broadcast to WebSocket clients for instant frontend update
             import asyncio
             asyncio.run_coroutine_threadsafe(
                 manager.broadcast_log({"type": "gate_status", "status": status}),

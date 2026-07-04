@@ -61,15 +61,17 @@ def get_gate_status():
     return {"status": get_gate_state()}
 
 @app.post("/api/gate/open")
-def open_gate(source: str = "manual"):
+async def open_gate(source: str = "manual"):
     publish_gate_command("open", source=source)
     set_gate_state("OPEN")
+    await manager.broadcast_log({"type": "gate_status", "status": "OPEN"})
     return {"status": "success", "message": "Gate open command sent"}
 
 @app.post("/api/gate/close")
-def close_gate(source: str = "manual"):
+async def close_gate(source: str = "manual"):
     publish_gate_command("close", source=source)
     set_gate_state("CLOSED")
+    await manager.broadcast_log({"type": "gate_status", "status": "CLOSED"})
     return {"status": "success", "message": "Gate close command sent"}
 
 @app.get("/api/video_feed")

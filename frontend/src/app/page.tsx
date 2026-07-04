@@ -66,10 +66,6 @@ export default function Dashboard() {
       const settingsRes = await fetch("http://localhost:8000/api/settings/face-recognition");
       const settingsData = await settingsRes.json();
       setFaceRecognitionEnabled(settingsData.enabled);
-
-      const gateRes = await fetch("http://localhost:8000/api/gate/status");
-      const gateData = await gateRes.json();
-      setGateStatus(gateData.status);
     } catch (e) {
       console.error("Failed to fetch dashboard data", e);
     }
@@ -78,7 +74,24 @@ export default function Dashboard() {
   useEffect(() => {
     fetchDashboardData();
     const interval = setInterval(fetchDashboardData, 5000);
-    return () => clearInterval(interval);
+
+    const ws = new WebSocket("ws://localhost:8000/ws");
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "gate_status") {
+          setGateStatus(data.status);
+        }
+      } catch (e) {
+        console.error("WebSocket message error", e);
+      }
+    };
+    ws.onerror = () => console.error("WebSocket connection error");
+
+    return () => {
+      clearInterval(interval);
+      ws.close();
+    };
   }, []);
 
   const handleManualControl = async (action: 'open' | 'close') => {
