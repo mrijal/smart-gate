@@ -9,28 +9,56 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
+#include <NocShield.h>
 
-// --- Config: WiFi ---
+// ============================================================
+// NocShield Instance
+// ============================================================
+NocShield nocShield;
+
+// AES-256 Key & IV untuk enkripsi payload MQTT
+// NOTE: Di production, simpan di NVS partition, jangan hardcode
+static const uint8_t aesKey[32] = "SmartGateAES256Key!!Nocturnail";
+static const uint8_t aesIV[16]  = "NocShieldIV16!!";
+
+// ============================================================
+// SHA-256 Hashed UID Whitelist (NocShield)
+// Hash dari UID asli menggunakan nocShield.hashSHA256()
+// ============================================================
+const String authorizedUIDHashes[] = {
+  "73579bf6ba9332f51a161448fc0ebad9edd2261d9cc1e897ac11a0e32ad99bdc"  // hash("62C92803")
+};
+const int numAuthorizedUIDHashes = sizeof(authorizedUIDHashes) / sizeof(authorizedUIDHashes[0]);
+
+// ============================================================
+// Deauth Detection State (NocShield)
+// ============================================================
+static volatile int deauthFrameCount = 0;
+static volatile unsigned long deauthWindowStart = 0;
+static const int DEAUTH_THRESHOLD = 10;
+static const unsigned long DEAUTH_WINDOW_MS = 5000;
+
+// ============================================================
+// Config: WiFi
+// ============================================================
 const char* ssid = "anif";
 const char* password = "12345688";
 
-// --- Config: MQTT (Shiftr.io) ---
+// ============================================================
+// Config: MQTT (Shiftr.io)
+// ============================================================
 const char* mqtt_server = "madrjl-websocket.cloud.shiftr.io";
 const int mqtt_port = 1883;
 const char* mqtt_user = "madrjl-websocket";
 const char* mqtt_password = "R5vzRevrusL8y35I";
 const char* mqtt_client_id = "ESP32_Gate_Controller";
 
-// --- Config: Hardware Pins ---
+// ============================================================
+// Config: Hardware Pins
+// ============================================================
 #define SS_PIN 5
 #define RST_PIN 22
 #define SERVO_PIN 27
-
-// --- Config: Authorized RFID UIDs (hardcoded whitelist, local) ---
-const String authorizedUIDs[] = {
-  "62C92803",   // UID kartu 1
-};
-const int numAuthorizedUIDs = sizeof(authorizedUIDs) / sizeof(authorizedUIDs[0]);
 
 // --- Objects ---
 WiFiClient espClient;
@@ -43,31 +71,29 @@ int gateClosedAngle = 0;
 int gateOpenAngle = 90;
 bool isGateOpen = false;
 unsigned long gateOpenedAt = 0;
-const unsigned long gateOpenDuration = 5000; // 5 seconds
+const unsigned long gateOpenDuration = 5000;
 unsigned long lastHeartbeat = 0;
 
 // ============================================================
 // FreeRTOS Primitives
 // ============================================================
-SemaphoreHandle_t xSpiMutex;      // Mutex: proteksi akses SPI (RFID)
-SemaphoreHandle_t xGateMutex;     // Mutex: proteksi state isGateOpen
-QueueHandle_t xGateCommandQueue;  // Queue: perintah buka/tutup gate
-QueueHandle_t xMqttPublishQueue;  // Queue: pesan MQTT yang mau dipublish
+SemaphoreHandle_t xSpiMutex;
+SemaphoreHandle_t xGateMutex;
+QueueHandle_t xGateCommandQueue;
+QueueHandle_t xMqttPublishQueue;
 
-// Enum gate command
 typedef enum {
   GATE_CMD_OPEN,
   GATE_CMD_CLOSE
 } GateCommand;
 
-// Struct MQTT message
 typedef struct {
   char topic[64];
   char payload[256];
 } MqttMessage;
 
 // ============================================================
-// Helper: enqueue MQTT publish (aman dipanggil dari task manapun)
+// Helper: enqueue MQTT publish
 // ============================================================
 void enqueueMqttPublish(const char* topic, const char* payload) {
   MqttMessage msg;
@@ -77,17 +103,28 @@ void enqueueMqttPublish(const char* topic, const char* payload) {
 }
 
 // ============================================================
-// Helper: cek UID di whitelist
+// Helper: enqueue MQTT dengan payload AES terenkripsi (NocShield)
 // ============================================================
-bool isAuthorized(String uid) {
-  for (int i = 0; i < numAuthorizedUIDs; i++) {
-    if (authorizedUIDs[i] == uid) return true;
+void enqueueMqttPublishEncrypted(const char* topic, const char* plaintext) {
+  String encrypted = nocShield.encryptAES(plaintext, aesKey, aesIV);
+  MqttMessage msg;
+  strlcpy(msg.topic, topic, sizeof(msg.topic));
+  strlcpy(msg.payload, encrypted.c_str(), sizeof(msg.payload));
+  xQueueSend(xMqttPublishQueue, &msg, pdMS_TO_TICKS(100));
+}
+
+// ============================================================
+// Helper: cek hash UID di whitelist (NocShield SHA-256)
+// ============================================================
+bool isAuthorizedHash(const String& uidHash) {
+  for (int i = 0; i < numAuthorizedUIDHashes; i++) {
+    if (authorizedUIDHashes[i] == uidHash) return true;
   }
   return false;
 }
 
 // ============================================================
-// publishStatus & publishHeartbeat: enqueue, bukan publish langsung
+// publishStatus & publishHeartbeat
 // ============================================================
 void publishStatus(String status) {
   String payload = "{\"status\":\"" + status + "\"}";
@@ -99,8 +136,7 @@ void publishHeartbeat() {
 }
 
 // ============================================================
-// openGate / closeGate: aman dipanggil dari task manapun via queue
-// Hanya dieksekusi di taskGateControl
+// openGate / closeGate
 // ============================================================
 void openGate() {
   xSemaphoreTake(xGateMutex, portMAX_DELAY);
@@ -112,11 +148,9 @@ void openGate() {
     xSemaphoreGive(xGateMutex);
     publishStatus("OPEN");
   } else {
-    // Gate sudah terbuka (mungkin dibuka via face recog/palm):
-    // reset timer supaya tidak langsung menutup, dan RFID tetap bisa re-trigger
     gateOpenedAt = millis();
     xSemaphoreGive(xGateMutex);
-    Serial.println("Gate sudah terbuka, timer direset.");
+    Serial.println("Gate already open, timer reset.");
     publishStatus("OPEN");
   }
 }
@@ -135,9 +169,7 @@ void closeGate() {
 }
 
 // ============================================================
-// MQTT Callback: dipanggil di task MQTT saat ada pesan masuk
-// Tidak langsung panggil openGate/closeGate — kirim ke queue
-// supaya tidak race condition dengan RFID task
+// MQTT Callback
 // ============================================================
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
@@ -186,8 +218,23 @@ void setup_wifi() {
 }
 
 // ============================================================
+// Promiscuous Callback untuk Deauth Detection (NocShield)
+// ============================================================
+void deauthPacketCallback(void* buf, wifi_promiscuous_pkt_type_t type) {
+  if (type != WIFI_PKT_MGMT) return;
+
+  wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t*)buf;
+  if (pkt->payload == NULL || pkt->len < 1) return;
+
+  // Frame Control byte: 0xC0 = Deauthentication
+  // Bit 4-7: subtype (0xC = deauth), Bit 2-3: type (0 = mgmt)
+  if ((pkt->payload[0] & 0xFC) == 0xC0) {
+    deauthFrameCount++;
+  }
+}
+
+// ============================================================
 // TASK 1: MQTT — Core 0
-// Handles: reconnect non-blocking, client.loop(), publish queue, heartbeat
 // ============================================================
 void taskMQTT(void* pvParameters) {
   unsigned long lastReconnectAttempt = 0;
@@ -203,7 +250,6 @@ void taskMQTT(void* pvParameters) {
           Serial.println("connected");
           client.subscribe("gate/open");
           client.subscribe("gate/close");
-          // Publish online status setiap kali berhasil (re)connect
           enqueueMqttPublish("device/heartbeat", "{\"device\":\"esp32\",\"status\":\"online\"}");
         } else {
           Serial.print("failed, rc=");
@@ -214,14 +260,12 @@ void taskMQTT(void* pvParameters) {
     } else {
       client.loop();
 
-      // Heartbeat setiap 30 detik
       unsigned long now = millis();
       if (now - lastHeartbeat >= 30000) {
         publishHeartbeat();
         lastHeartbeat = now;
       }
 
-      // Proses antrian MQTT publish
       MqttMessage msg;
       while (xQueueReceive(xMqttPublishQueue, &msg, 0) == pdTRUE) {
         client.publish(msg.topic, msg.payload);
@@ -238,13 +282,10 @@ void taskMQTT(void* pvParameters) {
 
 // ============================================================
 // TASK 2: RFID — Core 1
-// Handles: polling kartu, cek whitelist, kirim perintah ke gate queue
-// FIX BUG: PICC_HaltA + PCD_StopCrypto1 setelah setiap baca
-// supaya scan berikutnya tidak stuck
+// SHA-256 hash UID + AES encrypted MQTT publish
 // ============================================================
 void taskRFID(void* pvParameters) {
   for (;;) {
-    // Ambil mutex SPI sebelum akses RFID reader
     if (xSemaphoreTake(xSpiMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
       if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
         String uidString = "";
@@ -254,45 +295,45 @@ void taskRFID(void* pvParameters) {
         }
         uidString.toUpperCase();
 
-        // *** FIX UTAMA: Halt PICC dan stop crypto ***
-        // Tanpa ini, kartu tetap "active" di reader → scan berikutnya SELALU gagal
-        // Ini adalah root cause RFID tidak bisa setelah gate dibuka via face recog/palm
         mfrc522.PICC_HaltA();
         mfrc522.PCD_StopCrypto1();
-
-        // Lepas mutex SPI sebelum proses lebih lanjut
         xSemaphoreGive(xSpiMutex);
 
         Serial.print("RFID Read: ");
         Serial.println(uidString);
 
-        bool granted = isAuthorized(uidString);
+        // --- NocShield: SHA-256 hash UID ---
+        String uidHash = nocShield.hashSHA256(uidString);
+        Serial.print("SHA-256: ");
+        Serial.println(uidHash);
 
-        // Publish ke backend untuk logging (kalau MQTT konek)
+        // Cek whitelist hash
+        bool granted = isAuthorizedHash(uidHash);
+
+        // --- Kirim encrypted UID via MQTT (NocShield AES) ---
         if (client.connected()) {
           DynamicJsonDocument doc(256);
           doc["method"] = "rfid";
-          doc["uid"] = uidString;
+          doc["uid_hash"] = uidHash;          // SHA-256 hash for backend logging
           doc["granted"] = granted;
           String mqttPayload;
           serializeJson(doc, mqttPayload);
-          enqueueMqttPublish("gate/auth/request", mqttPayload.c_str());
-        } else {
-          Serial.println("MQTT belum connected - skip publish, tetap proses whitelist lokal");
+          // Kirim payload terenkripsi AES
+          enqueueMqttPublishEncrypted("gate/auth/request", mqttPayload.c_str());
         }
 
         if (granted) {
-          Serial.println("Access granted (local whitelist)");
+          Serial.println("Access GRANTED");
           GateCommand cmd = GATE_CMD_OPEN;
           xQueueSend(xGateCommandQueue, &cmd, pdMS_TO_TICKS(100));
         } else {
-          Serial.println("Access denied - UID not in whitelist");
+          Serial.println("Access DENIED");
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Debounce 1 detik
+        vTaskDelay(pdMS_TO_TICKS(1000));
       } else {
         xSemaphoreGive(xSpiMutex);
-        vTaskDelay(pdMS_TO_TICKS(50)); // Poll tiap 50ms kalau tidak ada kartu
+        vTaskDelay(pdMS_TO_TICKS(50));
       }
     } else {
       vTaskDelay(pdMS_TO_TICKS(10));
@@ -302,12 +343,9 @@ void taskRFID(void* pvParameters) {
 
 // ============================================================
 // TASK 3: GATE CONTROL — Core 1
-// Handles: eksekusi perintah buka/tutup, auto-close timer
-// Satu-satunya task yang boleh gerakkan servo
 // ============================================================
 void taskGateControl(void* pvParameters) {
   for (;;) {
-    // Terima perintah dari queue (dari RFID task atau MQTT callback)
     GateCommand cmd;
     if (xQueueReceive(xGateCommandQueue, &cmd, pdMS_TO_TICKS(10)) == pdTRUE) {
       if (cmd == GATE_CMD_OPEN) {
@@ -317,7 +355,6 @@ void taskGateControl(void* pvParameters) {
       }
     }
 
-    // Cek auto-close dengan mutex
     xSemaphoreTake(xGateMutex, portMAX_DELAY);
     bool shouldClose = isGateOpen && ((millis() - gateOpenedAt) >= gateOpenDuration);
     xSemaphoreGive(xGateMutex);
@@ -331,13 +368,51 @@ void taskGateControl(void* pvParameters) {
 }
 
 // ============================================================
+// TASK 4: DEAUTH MONITOR — Core 0 (NocShield)
+// ============================================================
+void taskDeauthMonitor(void* pvParameters) {
+  deauthWindowStart = millis();
+
+  for (;;) {
+    unsigned long now = millis();
+
+    // Reset window every DEAUTH_WINDOW_MS
+    if (now - deauthWindowStart >= DEAUTH_WINDOW_MS) {
+      if (deauthFrameCount > DEAUTH_THRESHOLD) {
+        Serial.println("=== DEAUTH ATTACK DETECTED! ===");
+        Serial.print("Deauth frame count: ");
+        Serial.println(deauthFrameCount);
+
+        // Publish alert via MQTT (plaintext — alert harus segera sampai)
+        if (client.connected()) {
+          DynamicJsonDocument doc(128);
+          doc["type"] = "deauth_attack";
+          doc["count"] = deauthFrameCount;
+          doc["window_ms"] = DEAUTH_WINDOW_MS;
+          String payload;
+          serializeJson(doc, payload);
+          enqueueMqttPublish("gate/alert", payload.c_str());
+        }
+      }
+      deauthFrameCount = 0;
+      deauthWindowStart = now;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+}
+
+// ============================================================
 // SETUP
 // ============================================================
 void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  // Setup WiFi
+  Serial.println("Initializing NocShield...");
+  nocShield.begin();
+  Serial.println("NocShield ready.");
+
   setup_wifi();
 
   // Setup MQTT
@@ -349,7 +424,6 @@ void setup() {
   mfrc522.PCD_Init();
   delay(50);
 
-  // Self-test RC522
   byte version = mfrc522.PCD_ReadRegister(MFRC522::VersionReg);
   Serial.print("MFRC522 Version Register: 0x");
   Serial.println(version, HEX);
@@ -378,12 +452,17 @@ void setup() {
   xGateCommandQueue = xQueueCreate(10, sizeof(GateCommand));
   xMqttPublishQueue = xQueueCreate(20, sizeof(MqttMessage));
 
-  // Buat tasks dan pin ke core
-  xTaskCreatePinnedToCore(taskMQTT,        "MQTT Task",         4096, NULL, 1, NULL, 0); // Core 0, priority 1
-  xTaskCreatePinnedToCore(taskRFID,        "RFID Task",         4096, NULL, 2, NULL, 1); // Core 1, priority 2
-  xTaskCreatePinnedToCore(taskGateControl, "Gate Control Task", 2048, NULL, 2, NULL, 1); // Core 1, priority 2
+  // Buat tasks
+  xTaskCreatePinnedToCore(taskMQTT,          "MQTT Task",         4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(taskRFID,          "RFID Task",         4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(taskGateControl,   "Gate Control Task", 2048, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(taskDeauthMonitor, "Deauth Monitor",    2048, NULL, 1, NULL, 0);
 
-  Serial.println("All tasks started. System ready.");
+  // NocShield: Start packet monitor untuk deauth detection
+  nocShield.startPacketMonitor(deauthPacketCallback);
+
+  Serial.println("All tasks started. NocShield active.");
+  Serial.println("Deauth monitor active.");
 }
 
 // ============================================================

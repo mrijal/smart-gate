@@ -10,3 +10,4 @@ insightface
 onnxruntime-gpu
 python-multipart
 mediapipe
+pycryptodome

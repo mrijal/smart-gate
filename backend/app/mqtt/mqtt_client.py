@@ -5,6 +5,7 @@ import threading
 from app.database.database import SessionLocal
 from app.models.models import Device, AccessLog, User
 from app.websocket.ws_manager import manager
+from app.security.crypto import decrypt_aes_256_cbc, is_encrypted_payload
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "madrjl-websocket.cloud.shiftr.io")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
@@ -20,17 +21,31 @@ def on_connect(client, userdata, flags, rc):
     client.subscribe("device/heartbeat")
     client.subscribe("gate/auth/request")
     client.subscribe("gate/logs")
+    client.subscribe("gate/alert")
 
 def on_message(client, userdata, msg):
     print(f"MQTT Message Received: {msg.topic} {str(msg.payload)}")
     try:
-        payload = json.loads(msg.payload.decode())
+        raw = msg.payload.decode()
+
+        # Coba decrypt jika payload terenkripsi (dari ESP32 NocShield AES)
+        if is_encrypted_payload(raw):
+            try:
+                decrypted = decrypt_aes_256_cbc(raw)
+                print(f"Decrypted payload: {decrypted}")
+                payload = json.loads(decrypted)
+            except Exception as e:
+                print(f"AES decryption failed: {e}")
+                return
+        else:
+            payload = json.loads(raw)
+
         db = SessionLocal()
-        
+
         if msg.topic == "device/heartbeat":
             device_name = payload.get("device")
             status = payload.get("status")
-            
+
             device = db.query(Device).filter(Device.device_name == device_name).first()
             if not device:
                 device = Device(device_name=device_name, status=status)
@@ -41,24 +56,36 @@ def on_message(client, userdata, msg):
 
         elif msg.topic == "gate/status":
             status = payload.get("status")
-            # Update backend gate state
             from app.services.camera import set_gate_state
             set_gate_state(status)
-            # Broadcast to WebSocket clients for instant frontend update
             import asyncio
             asyncio.run_coroutine_threadsafe(
                 manager.broadcast_log({"type": "gate_status", "status": status}),
                 asyncio.get_event_loop()
             )
-            
+
         elif msg.topic == "gate/auth/request":
-            # Handle RFID auth request
-            uid = payload.get("uid")
+            uid_hash = payload.get("uid_hash")
             method = payload.get("method")
+            granted = payload.get("granted")
             if method == "rfid":
-                print(f"RFID Auth request for UID: {uid}")
-                # Implementation for verifying RFID would go here
-                
+                print(f"RFID Auth request — uid_hash: {uid_hash}, granted: {granted}")
+
+        elif msg.topic == "gate/alert":
+            alert_type = payload.get("type")
+            count = payload.get("count")
+            print(f"*** ALERT from ESP32: {alert_type} (count={count}) ***")
+            import asyncio
+            asyncio.run_coroutine_threadsafe(
+                manager.broadcast_log({
+                    "type": "alert",
+                    "alert_type": alert_type,
+                    "count": count,
+                    "message": f"ESP32 detected {alert_type}!"
+                }),
+                asyncio.get_event_loop()
+            )
+
         db.close()
     except Exception as e:
         print(f"Error processing MQTT message: {e}")
